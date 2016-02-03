@@ -7,7 +7,8 @@ var _ = module.parent.require('underscore'),
 	winston = module.parent.require('winston'),
 	async = module.parent.require('async'),
 	db = module.parent.require('./database'),
-	nconf = module.parent.require('nconf');
+	nconf = module.parent.require('nconf'),
+	superagent = require('superagent');
 
 var jwt = require('jsonwebtoken');
 
@@ -27,7 +28,9 @@ var controllers = require('./lib/controllers'),
 			'payload:firstName': undefined,
 			'payload:lastName': undefined,
 			'payload:picture': 'picture',
-			'payload:parent': undefined
+			'payload:parent': undefined,
+			exchangeTokenEndpoint: '',
+			logoutEndpoint: ''
 		}
 	};
 
@@ -48,37 +51,43 @@ plugin.init = function(params, callback) {
 
 plugin.process = function(token, callback) {
 	async.waterfall([
-		async.apply(jwt.verify, token, plugin.settings.secret),
-		async.apply(plugin.verifyToken),
-		async.apply(plugin.findUser),
-		async.apply(plugin.verifyUser)
+		async.apply(plugin.getToken, token),
+		async.apply(plugin.verify),
+		async.apply(plugin.findUser)
 	], callback);
 };
 
-plugin.verifyToken = function(payload, callback) {
-	var parent = plugin.settings['payload:parent'],
-		id = parent ? payload[parent][plugin.settings['payload:id']] : payload[plugin.settings['payload:id']],
-		username = parent ? payload[parent][plugin.settings['payload:username']] : payload[plugin.settings['payload:username']],
-		firstName = parent ? payload[parent][plugin.settings['payload:firstName']] : payload[plugin.settings['payload:firstName']],
-		lastName = parent ? payload[parent][plugin.settings['payload:lastName']] : payload[plugin.settings['payload:lastName']];
+plugin.getToken = function (payload, callback) {
+	superagent
+		.post(plugin.settings.exchangeTokenEndpoint)
+		.set('Accept', 'application/json')
+		.send({
+			refreshToken: payload
+		})
+		.end(function(err, res) {
+			if(err) {
+				callback(err);
+				return;
+			}
 
-	if (!id || (!username && !firstName && !lastName)) {
+			jwt.verify(res.body.token, plugin.settings.secret, function (err, res) {
+				if(err) {
+					return callback(err);
+				}
+				callback(null, res);
+			})
+		});
+}
+
+plugin.verify = function(payload, callback) {
+	var parent = plugin.settings['payload:parent'],
+		email = parent ? payload[parent][plugin.settings['payload:email']] : payload[plugin.settings['payload:email']];
+	if (!email ) {
 		return callback(new Error('payload-invalid'));
 	}
 
 	callback(null, payload);
-};
-
-plugin.verifyUser = function(uid, callback) {
-	// Check ban state of user, reject if banned
-	user.getUserField(uid, 'banned', function(err, banned) {
-		if (parseInt(banned, 10) === 1) {
-			return callback(new Error('banned'));
-		}
-
-		callback(null, uid);
-	});
-};
+}
 
 plugin.findUser = function(payload, callback) {
 	// If payload id resolves to a user, return the uid, otherwise register a new user
@@ -105,7 +114,7 @@ plugin.findUser = function(payload, callback) {
 		mergeUid: async.apply(db.sortedSetScore, 'email:uid', email)
 	}, function(err, checks) {
 		if (err) { return callback(err); }
-		if (checks.uid && !isNaN(parseInt(checks.uid, 10))) { return callback(null, checks.uid); }
+		if (checks.uid && !isNaN(parseInt(checks.uid, 10))) { return callback(null, {uid: checks.uid, user: {id: id}}); }
 		else if (email && email.length && checks.mergeUid && !isNaN(parseInt(checks.mergeUid, 10))) {
 			winston.info('[session-sharing] Found user via their email, associating this id (' + id + ') with their NodeBB account');
 			db.setObjectField(plugin.settings.name + ':uid', id, checks.mergeUid);
@@ -125,7 +134,7 @@ plugin.findUser = function(payload, callback) {
 			if (err) { return callback(err); }
 
 			db.setObjectField(plugin.settings.name + ':uid', id, uid);
-			callback(null, uid);
+			callback(null, {uid: uid, user: {id: id}});
 		});
 	});
 };
@@ -135,17 +144,13 @@ plugin.addMiddleware = function(data, callback) {
 		if (plugin.settings.guestRedirect) {
 			// If a guest redirect is specified, follow it
 			res.redirect(plugin.settings.guestRedirect.replace('%1', encodeURIComponent(nconf.get('url') + req.path)));
-		} else if (res.locals.fullRefresh === true) {
-			res.redirect(req.url);
-		} else {
-			next();
 		}
 	};
 
 	data.app.use(function(req, res, next) {
 		// Only respond to page loads by guests, not api or asset calls
 		var blacklistedRoute = new RegExp('^' + nconf.get('relative_path') + '/(api|vendor|uploads|language|templates|debug)'),
-			blacklistedExt = /\.(css|js|tpl|json|jpg|png|bmp|rss|xml|woff2)$/,
+			blacklistedExt = /\.(css|js|tpl|json)$/,
 			hasSession = req.hasOwnProperty('user') && req.user.hasOwnProperty('uid') && parseInt(req.user.uid, 10) > 0;
 
 		if (
@@ -155,13 +160,18 @@ plugin.addMiddleware = function(data, callback) {
 		) {
 			return next();
 		} else {
+			if(req.path === '/logout') {
+				req.session.logout = true;
+				return next();
+			}
+			if(req.session.logout) {
+				req.session.logout = false;
+				return res.redirect(plugin.settings.logoutEndpoint);
+			}
 			if (Object.keys(req.cookies).length && req.cookies.hasOwnProperty(plugin.settings.cookieName) && req.cookies[plugin.settings.cookieName].length) {
-				return plugin.process(req.cookies[plugin.settings.cookieName], function(err, uid) {
+				return plugin.process(req.cookies[plugin.settings.cookieName], function(err, payload) {
 					if (err) {
 						switch(err.message) {
-							case 'banned':
-								winston.info('[session-sharing] uid ' + uid + ' is banned, not logging them in');
-								break;
 							case 'payload-invalid':
 								winston.warn('[session-sharing] The passed-in payload was invalid and could not be processed');
 								break;
@@ -170,21 +180,28 @@ plugin.addMiddleware = function(data, callback) {
 								break;
 						}
 
-						return next();
+						return handleGuest(req, res, next);
 					}
 
-					winston.info('[session-sharing] Processing login for uid ' + uid);
+					winston.info('[session-sharing] Processing login for uid ' + payload.uid);
+					var token = jwt.sign(payload.user, plugin.settings.secret)
+					res.cookie('token', token, {
+						maxAge: 1000*60*60*24*21,
+						httpOnly: true,
+						domain: plugin.settings.cookieDomain
+					});
+
 					req.login({
-						uid: uid
+						uid: payload.uid
 					}, function() {
-						req.uid = uid;
+
+						req.uid = payload.uid;
 						next();
 					});
 				});
 			} else if (hasSession) {
 				// Has login session but no cookie, logout
 				req.logout();
-				res.locals.fullRefresh = true;
 				handleGuest.apply(null, arguments);
 			} else {
 				handleGuest.apply(null, arguments);
@@ -195,17 +212,15 @@ plugin.addMiddleware = function(data, callback) {
 	callback();
 };
 
-plugin.cleanup = function(data, callback) {
+plugin.cleanup = function(req, res) {
 	if (plugin.settings.cookieDomain) {
 		winston.verbose('[session-sharing] Clearing cookie');
-		data.res.clearCookie(plugin.settings.cookieName, {
+		res.cookie(plugin.settings.cookieName, {
 			domain: plugin.settings.cookieDomain,
 			expires: new Date(),
 			path: '/'
 		});
 	}
-
-	callback();
 };
 
 plugin.generate = function(req, res) {
@@ -213,7 +228,6 @@ plugin.generate = function(req, res) {
 	payload[plugin.settings['payload:id']] = 1;
 	payload[plugin.settings['payload:username']] = 'testUser';
 	payload[plugin.settings['payload:email']] = 'testUser@example.org';
-
 	var token = jwt.sign(payload, plugin.settings.secret)
 	res.cookie('token', token, {
 		maxAge: 1000*60*60*24*21,

@@ -20,6 +20,20 @@
 				</p>
 			</div>
 			<div class="form-group">
+				<label for="exchangeTokenEndpoint">Exchange Token Endpoint</label>
+				<input type="text" id="exchangeTokenEndpoint" name="exchangeTokenEndpoint" title="Exchange Token" class="form-control" />
+				<p class="help-block">
+					Obtain a valid access token from the refresh token
+				</p>
+			</div>
+			<div class="form-group">
+				<label for="logoutEndpoint">Logout Endpoint</label>
+				<input type="text" id="logoutEndpoint" name="logoutEndpoint" title="Logout Endpoint" class="form-control" />
+				<p class="help-block">
+					Remove logout token
+				</p>
+			</div>
+			<div class="form-group">
 				<label for="secret">JWT Secret</label>
 				<input type="text" id="secret" name="secret" title="JWT Secret" class="form-control" />
 				<p class="help-block">
