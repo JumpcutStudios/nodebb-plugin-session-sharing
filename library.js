@@ -118,7 +118,7 @@ plugin.findUser = function(payload, callback) {
 		else if (email && email.length && checks.mergeUid && !isNaN(parseInt(checks.mergeUid, 10))) {
 			winston.info('[session-sharing] Found user via their email, associating this id (' + id + ') with their NodeBB account');
 			db.setObjectField(plugin.settings.name + ':uid', id, checks.mergeUid);
-			return callback(null, checks.mergeUid);
+			return callback(null, {uid: checks.mergeUid, user: {id: id}});
 		}
 
 		// If no match, create a new user
@@ -189,12 +189,6 @@ plugin.addMiddleware = function(data, callback) {
 					}
 
 					winston.info('[session-sharing] Processing login for uid ' + payload.uid);
-					var token = jwt.sign(payload.user, plugin.settings.secret)
-					res.cookie('token', token, {
-						maxAge: 1000*60*60*24*21,
-						httpOnly: true,
-						domain: plugin.settings.cookieDomain
-					});
 
 					req.login({
 						uid: payload.uid
