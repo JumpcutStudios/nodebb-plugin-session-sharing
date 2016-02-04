@@ -144,6 +144,8 @@ plugin.addMiddleware = function(data, callback) {
 		if (plugin.settings.guestRedirect) {
 			// If a guest redirect is specified, follow it
 			res.redirect(plugin.settings.guestRedirect.replace('%1', encodeURIComponent(nconf.get('url') + req.path)));
+		} else {
+			return next();
 		}
 	};
 
@@ -166,7 +168,10 @@ plugin.addMiddleware = function(data, callback) {
 			}
 			if(req.session.logout) {
 				req.session.logout = false;
-				return res.redirect(plugin.settings.logoutEndpoint);
+				if(plugin.settings.logoutEndpoint) {
+					return res.redirect(plugin.settings.logoutEndpoint);
+				}
+				return next();
 			}
 			if (Object.keys(req.cookies).length && req.cookies.hasOwnProperty(plugin.settings.cookieName) && req.cookies[plugin.settings.cookieName].length) {
 				return plugin.process(req.cookies[plugin.settings.cookieName], function(err, payload) {
