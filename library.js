@@ -113,12 +113,30 @@ plugin.findUser = function(payload, callback) {
 		uid: async.apply(db.getObjectField, plugin.settings.name + ':uid', id),
 		mergeUid: async.apply(db.sortedSetScore, 'email:uid', email)
 	}, function(err, checks) {
+		var setUserName = function (uid, cb) {
+			user.getUserData(uid, function (err, data) {
+				if(data.username !== username) {
+					user.updateProfile(uid, {'username': username}, function (err, res) {
+						cb(null, res);
+					});
+				}
+			});
+		}
+
 		if (err) { return callback(err); }
-		if (checks.uid && !isNaN(parseInt(checks.uid, 10))) { return callback(null, {uid: checks.uid, user: {id: id}}); }
+		if (checks.uid && !isNaN(parseInt(checks.uid, 10))) {
+			setUserName(checks.mergeUid, function () {
+				callback(null, {uid: checks.uid, user: {id: id}});
+			})
+			return;
+		}
 		else if (email && email.length && checks.mergeUid && !isNaN(parseInt(checks.mergeUid, 10))) {
 			winston.info('[session-sharing] Found user via their email, associating this id (' + id + ') with their NodeBB account');
 			db.setObjectField(plugin.settings.name + ':uid', id, checks.mergeUid);
-			return callback(null, {uid: checks.mergeUid, user: {id: id}});
+			setUserName(checks.mergeUid, function () {
+				callback(null, {uid: checks.mergeUid, user: {id: id}});
+			})
+			return;
 		}
 
 		// If no match, create a new user
