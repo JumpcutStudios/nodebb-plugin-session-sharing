@@ -125,6 +125,8 @@ plugin.findUser = function(payload, callback) {
 						}
 						cb(null, res);
 					});
+				} else {
+					cb();
 				}
 			});
 		}
