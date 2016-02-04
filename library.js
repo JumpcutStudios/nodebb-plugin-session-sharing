@@ -115,8 +115,14 @@ plugin.findUser = function(payload, callback) {
 	}, function(err, checks) {
 		var setUserName = function (uid, cb) {
 			user.getUserData(uid, function (err, data) {
+				if(err) {
+					return cb(err);
+				}
 				if(data.username !== username) {
 					user.updateProfile(uid, {'username': username}, function (err, res) {
+						if(err) {
+							return cb(err);
+						}
 						cb(null, res);
 					});
 				}
