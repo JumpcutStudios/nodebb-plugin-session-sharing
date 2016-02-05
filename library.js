@@ -118,8 +118,8 @@ plugin.findUser = function(payload, callback) {
 				if(err) {
 					return cb(err);
 				}
-				if(data.username !== username) {
-					user.updateProfile(uid, {'username': username}, function (err, res) {
+				if(data.username !== username || data.picture !== picture) {
+					user.updateProfile(uid, {'username': username, 'picture': picture}, function (err, res) {
 						if(err) {
 							return cb(err);
 						}
