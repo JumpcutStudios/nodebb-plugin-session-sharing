@@ -100,6 +100,7 @@ plugin.findUser = function(payload, callback) {
 		firstName = parent ? payload[parent][plugin.settings['payload:firstName']] : payload[plugin.settings['payload:firstName']],
 		lastName = parent ? payload[parent][plugin.settings['payload:lastName']] : payload[plugin.settings['payload:lastName']],
 		picture = parent ? payload[parent][plugin.settings['payload:picture']] : payload[plugin.settings['payload:picture']];
+		picture = picture.small;
 
 	if (!username && firstName && lastName) {
 		username = [firstName, lastName].join(' ').trim();
@@ -118,8 +119,12 @@ plugin.findUser = function(payload, callback) {
 				if(err) {
 					return cb(err);
 				}
-				if(data.username !== username || data.picture !== picture) {
-					user.updateProfile(uid, {'username': username, 'picture': picture}, function (err, res) {
+				if(picture) {
+					user.setUserField(uid, 'uploadedpicture', picture);
+					user.setUserField(uid, 'picture', picture);
+				}
+				if(data.username !== username) {
+					user.updateProfile(uid, {'username': username}, function (err, res) {
 						if(err) {
 							return cb(err);
 						}
