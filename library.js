@@ -119,6 +119,9 @@ plugin.findUser = function(payload, callback) {
 				if(err) {
 					return cb(err);
 				}
+        if(!data) {
+          return cb('payload-invalid');
+        }
 				if(picture) {
 					user.setUserField(uid, 'uploadedpicture', picture);
 					user.setUserField(uid, 'picture', picture);
